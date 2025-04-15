@@ -1,0 +1,57 @@
+# === PYTHON / FASTAPI ===
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.sqlite3
+*.pyc
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+
+# Virtual environment
+venv/
+.env
+.env.*
+
+# IDEs and editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# === DOCKER ===
+*.pid
+*.seed
+*.bak
+*.tmp
+docker-compose.override.yml
+
+# === REACT / FRONTEND ===
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+*.lock
+
+# === TESTS ===
+coverage/
+*.cover
+htmlcov/
+.tox/
+.nox/
+pytest_cache/
+
+# === SYSTEM FILES ===
+.DS_Store
+Thumbs.db
