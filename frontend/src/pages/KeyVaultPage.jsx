@@ -197,7 +197,7 @@ const KeyVaultPage = () => {
           {/* Filter Controls */}
           <div className="flex space-x-4">
             <div>
-              <label htmlFor="filter-expiry" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="filter-expiry" className="block text-sm font-bold text-gray-700 mb-1">
                 Expiry
               </label>
               <select
@@ -268,18 +268,18 @@ const KeyVaultPage = () => {
               const status = getExpiryStatus(s.expirationDate);
               return status.text === 'Expiring Soon';
             }).length > 0 && (
-              <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mb-6">
+              <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
                 <div className="flex">
                   <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-orange-500" viewBox="0 0 20 20" fill="currentColor">
+                    <svg className="h-5 w-5 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v4a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
                   </div>
                   <div className="ml-3 flex-1">
-                    <h3 className="text-sm font-medium text-orange-800">
+                    <h3 className="text-sm font-medium text-yellow-800">
                       Urgent Rotation Required
                     </h3>
-                    <div className="mt-2 text-sm text-orange-700">
+                    <div className="mt-2 text-sm text-yellow-700">
                       <p>
                         <strong className="font-medium">
                           {secrets.filter(s => {
@@ -293,14 +293,14 @@ const KeyVaultPage = () => {
                       <div className="flex space-x-2">
                         <button
                           type="button"
-                          className="inline-flex items-center px-3 py-2 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                          className="inline-flex items-center px-3 py-2 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
                         >
                           Send Renewal Reminder
                         </button>
                         <button
                           type="button"
                           onClick={showSuggestion}
-                          className="inline-flex items-center px-3 py-2 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-md text-orange-700 bg-orange-100 hover:bg-orange-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                          className="inline-flex items-center px-3 py-2 border border-yellow-700 shadow-sm text-sm leading-4 font-medium rounded-md text-yellow-700 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
                         >
                           View Rotation Suggestions
                         </button>
@@ -358,10 +358,7 @@ const KeyVaultPage = () => {
                         const status = getExpiryStatus(secret.expirationDate);
                         const rotationStatus = getRotationStatus(secret);
                         return (
-                          <tr key={secret.id} className={
-                            status.text === 'Expired' ? 'bg-red-50' : 
-                            status.text === 'Expiring Soon' ? 'bg-yellow-50' : ''
-                          }>
+                          <tr key={secret.id}>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{secret.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {secret.type === 'Secret' ? '🔐 ' : '📄 '}{secret.type}
@@ -533,8 +530,8 @@ const KeyVaultPage = () => {
             <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
               <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                 <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-orange-100 sm:mx-0 sm:h-10 sm:w-10">
-                    <svg className="h-6 w-6 text-orange-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 sm:mx-0 sm:h-10 sm:w-10">
+                    <svg className="h-6 w-6 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
                   </div>

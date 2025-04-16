@@ -33,3 +33,14 @@ async def detect_anomalies(
     end = datetime.strptime(end_date, "%Y-%m-%d")
     
     return await cost_service.detect_anomalies(start, end)
+
+@router.get("/insights")
+async def get_ai_insights(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD format")
+):
+    """Get AI-powered insights from cost data"""
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    return await cost_service.get_ai_insights(start, end)
