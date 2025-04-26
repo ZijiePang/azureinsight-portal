@@ -64,8 +64,6 @@ const CostExplorerPage = () => {
       const anomaliesData = await anomaliesResponse.json();
       const anomalyArray = anomaliesData.anomalies || [];
 
-      console.log("Fetched anomalies:", anomalyArray); // Debug log
-
       setAnomalies(anomalyArray);
       setAnomalousDays(countAnomalousDays(anomalyArray));
       
