@@ -1,10 +1,12 @@
 // src/pages/KeyVaultPage.js
 import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
+import { useMode } from '../contexts/ModeContext';
 
 const KeyVaultPage = () => {
   const [secrets, setSecrets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { useMock } = useMode();
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All');
@@ -163,7 +165,7 @@ const KeyVaultPage = () => {
   // Initial load
   useEffect(() => {
     fetchSecrets();
-  }, [activeTab]); // Refetch when tab changes
+  }, [activeTab, useMock]); 
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -367,7 +369,11 @@ const KeyVaultPage = () => {
                               {secret.tags?.environment || 'N/A'}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {format(parseISO(secret.expirationDate), 'MMM d, yyyy')}
+                              {secret.expirationDate && !isNaN(Date.parse(secret.expirationDate)) 
+                                ? format(parseISO(secret.expirationDate), 'MMM d, yyyy') 
+                                : 'N/A'
+                              }
+
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -455,17 +461,6 @@ const KeyVaultPage = () => {
         </div>
       </div>
 
-      {/* Toggle for Demo Mode */}
-      <div className="flex justify-end">
-        <div className="inline-flex items-center">
-          <span className="mr-3 text-sm text-gray-700">Live Mode</span>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" className="sr-only peer" />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
-            <span className="ml-3 text-sm text-gray-700">Demo Mode</span>
-          </label>
-        </div>
-      </div>
 
       {/* History Modal */}
       {showHistoryModal && selectedItemHistory && (

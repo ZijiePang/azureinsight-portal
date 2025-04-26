@@ -2,6 +2,103 @@
 from datetime import datetime, timedelta
 import random
 from typing import Dict, List, Optional, Union
+import os
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+from azure.keyvault.certificates import CertificateClient
+from app.routes import mode
+
+load_dotenv()
+
+VAULT_URL = os.getenv("AZURE_VAULT_URL")
+
+class KeyVaultServiceProxy:
+    def __init__(self):
+        self.mock_service = MockKeyVaultService()
+        self.real_service = RealKeyVaultService()
+
+    async def get_secrets(self):
+        if mode.USE_MOCK:
+            return await self.mock_service.get_secrets()
+        else:
+            return await self.real_service.get_secrets()
+
+    async def get_secrets_by_expiry_range(self, days: int):
+        if mode.USE_MOCK:
+            return await self.mock_service.get_secrets_by_expiry_range(days)
+        else:
+            return await self.real_service.get_secrets_by_expiry_range(days)
+
+    async def search_secrets(self, query: str):
+        if mode.USE_MOCK:
+            return await self.mock_service.search_secrets(query)
+        else:
+            return await self.real_service.search_secrets(query)
+
+
+class RealKeyVaultService:
+    def __init__(self):
+        self.credential = DefaultAzureCredential()
+        self.secret_client = SecretClient(vault_url=VAULT_URL, credential=self.credential)
+        self.cert_client = CertificateClient(vault_url=VAULT_URL, credential=self.credential)
+
+    async def get_secrets(self):
+        secrets = []
+        secret_names = set()
+        
+
+        for prop in self.secret_client.list_properties_of_secrets():
+            secret_names.add(prop.name)
+            secret = self.secret_client.get_secret(prop.name)
+            secrets.append({
+                "id": f"secret-{prop.name}",
+                "name": prop.name,
+                "type": "Secret",
+                "expirationDate": prop.expires_on.strftime("%Y-%m-%d") if prop.expires_on else "N/A",
+                "createdOn": prop.created_on.strftime("%Y-%m-%d"),
+                "enabled": prop.enabled,
+                "tags": prop.tags or {}
+            })
+        for prop in self.cert_client.list_properties_of_certificates():
+            cert = self.cert_client.get_certificate(prop.name)
+
+            # Certificate usually auto-generate a duplicate secret, deduplicate for less confusion
+            if cert.name in secret_names:
+                secrets = [s for s in secrets if s["name"] != cert.name]
+
+            secrets.append({
+                "id": f"cert-{prop.name}",
+                "name": prop.name,
+                "type": "Certificate",
+                "expirationDate": prop.expires_on.strftime("%Y-%m-%d") if prop.expires_on else "N/A",
+                "createdOn": prop.created_on.strftime("%Y-%m-%d"),
+                "enabled": prop.enabled,
+                "tags": prop.tags or {}
+            })
+        return {"value": secrets}
+
+    async def get_secrets_by_expiry_range(self, days: int):
+        from datetime import datetime, timedelta
+        today = datetime.utcnow()
+        future = today + timedelta(days=days)
+        all_secrets = await self.get_secrets()
+        return {
+            "value": [
+                s for s in all_secrets["value"]
+                if s["expirationDate"] != "N/A" and datetime.strptime(s["expirationDate"], "%Y-%m-%d") <= future
+            ]
+        }
+
+    async def search_secrets(self, query: str):
+        all_secrets = await self.get_secrets()
+        query = query.lower()
+        return {
+            "value": [
+                s for s in all_secrets["value"]
+                if query in s["name"].lower()
+            ]
+        }
 
 class MockKeyVaultService:
     def __init__(self):
@@ -103,5 +200,7 @@ class MockKeyVaultService:
         
         return {"value": filtered_secrets}
 
-# Create a singleton instance
-keyvault_service = MockKeyVaultService()
+
+def get_keyvault_service():
+    return KeyVaultServiceProxy()
+
