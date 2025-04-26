@@ -59,6 +59,8 @@ const CostExplorerPage = () => {
       const anomaliesData = await anomaliesResponse.json();
       const anomalyArray = anomaliesData.anomalies || [];
 
+      console.log("Fetched anomalies:", anomalyArray); // Debug log
+
       setAnomalies(anomalyArray);
       setAnomalousDays(countAnomalousDays(anomalyArray));
 
@@ -198,7 +200,7 @@ const CostExplorerPage = () => {
   useEffect(() => {
     fetchCostData();
     fetchUntaggedResources();
-  }, []);
+  }, [startDate, endDate, selectedAppId]); // Re-fetch when filters change
 
   // Calculate average daily cost
   const averageDailyCost = costData.length > 0 

@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 import random
 from typing import Dict, List, Optional, Union
-
+random.seed(42)
 class MockCostService:
     def __init__(self):
         self.resource_types = [
@@ -54,7 +54,7 @@ class MockCostService:
             date_string = current_date.strftime("%Y-%m-%d")
             
             # Generate 20-30 resources per day
-            resource_count = 20 + random.randint(0, 9)
+            resource_count = 50 + random.randint(0, 9)
             
             for i in range(resource_count):
                 resource_type = random.choice(self.resource_types)
@@ -79,9 +79,8 @@ class MockCostService:
                 elif resource_type == "App Service":
                     cost = 5 + random.random() * 45  # $5-$50
                 elif resource_type == "CosmosDB":
-                    # Add a cost spike on a specific day for anomaly detection demo
-                    if date_string == (start_date + timedelta(days=3)).strftime("%Y-%m-%d") and i % 5 == 0:
-                        cost = 200 + random.random() * 300  # Spike to $200-$500
+                    if date_string == (start_date + timedelta(days=3)).strftime("%Y-%m-%d"):
+                        cost = 1000 + random.random() * 500  # Spike to $1000-$1500 for all CosmosDB resources
                     else:
                         cost = 20 + random.random() * 80  # $20-$100
                 elif resource_type == "Azure Functions":
@@ -148,7 +147,7 @@ class MockCostService:
         }
     
     async def detect_anomalies(self, start_date: datetime, end_date: datetime):
-        """Detect cost anomalies in the specified date range"""
+        """Detect cost anomalies using statistical methods"""
         # Get cost data
         result = await self.get_cost_data(start_date, end_date)
         costs = result["costs"]
@@ -160,42 +159,53 @@ class MockCostService:
                 daily_costs[item["date"]] = 0
             daily_costs[item["date"]] += item["cost"]
         
-        # Calculate average daily cost
+        # Convert to series for analysis
         dates = list(daily_costs.keys())
         dates.sort()
         costs_list = [daily_costs[date] for date in dates]
-        avg_cost = sum(costs_list) / len(costs_list) if costs_list else 0
         
-        # Find anomalies (days with cost > 150% of average)
+        # Simple statistical anomaly detection
+        # 1. Calculate mean and standard deviation
+        mean_cost = sum(costs_list) / len(costs_list) if costs_list else 0
+        variance = sum((x - mean_cost) ** 2 for x in costs_list) / len(costs_list) if costs_list else 0
+        std_dev = variance ** 0.5
+        
+        # 2. Use Z-score method (consider values > 2 standard deviations as anomalies)
+        z_score_threshold = 1.5
         anomalies = []
-        anomaly_threshold = avg_cost * 1.5
         
-        for date in dates:
-            cost = daily_costs[date]
-            if cost > anomaly_threshold:
-                # Find the top contributors to this anomaly
-                day_resources = [item for item in costs if item["date"] == date]
-                day_resources.sort(key=lambda x: x["cost"], reverse=True)
-                top_contributors = day_resources[:3]
+        for i, date in enumerate(dates):
+            cost = costs_list[i]
+            if len(costs_list) > 1:  # Ensure we have enough data points
+                z_score = (cost - mean_cost) / std_dev if std_dev > 0 else 0
                 
-                anomalies.append({
-                    "date": date,
-                    "normalCost": round(avg_cost, 2),
-                    "anomalyCost": round(cost, 2),
-                    "percentageIncrease": round(((cost / avg_cost) - 1) * 100),
-                    "contributors": [
-                        {
-                            "resourceName": item["name"],
-                            "resourceType": item["type"],
-                            "cost": item["cost"]
-                        } for item in top_contributors
-                    ]
-                })
+                if z_score > z_score_threshold:
+                    # Find the top contributors to this anomaly
+                    day_resources = [item for item in costs if item["date"] == date]
+                    day_resources.sort(key=lambda x: x["cost"], reverse=True)
+                    top_contributors = day_resources[:3]
+                    
+                    anomalies.append({
+                        "date": date,
+                        "normalCost": round(mean_cost, 2),
+                        "anomalyCost": round(cost, 2),
+                        "percentageIncrease": round(((cost / mean_cost) - 1) * 100),
+                        "zScore": round(z_score, 2),
+                        "contributors": [
+                            {
+                                "resourceName": item["name"],
+                                "resourceType": item["type"],
+                                "cost": item["cost"]
+                            } for item in top_contributors
+                        ]
+                    })
+        print(anomalies)
         
         return {
             "anomalies": anomalies,
             "anomalyDaysCount": len(anomalies),
-            "averageDailyCost": round(avg_cost, 2)
+            "averageDailyCost": round(mean_cost, 2),
+            "standardDeviation": round(std_dev, 2)
         }
     
     async def get_ai_insights(self, start_date: datetime, end_date: datetime):
