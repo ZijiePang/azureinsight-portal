@@ -29,6 +29,11 @@ const CostExplorerPage = () => {
     "🔍 Detected the following unused resources still incurring costs for 7 days: vm-prod-usw-001 ($112/day). Consider evaluating necessity."
   ]);
 
+  const [sortField, setSortField] = useState('cost');
+  const [sortDirection, setSortDirection] = useState('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
   // Colors for charts
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
@@ -63,9 +68,6 @@ const CostExplorerPage = () => {
 
       setAnomalies(anomalyArray);
       setAnomalousDays(countAnomalousDays(anomalyArray));
-
-
-      
       
     } catch (err) {
       console.error("Failed to fetch cost data:", err);
@@ -102,6 +104,61 @@ const CostExplorerPage = () => {
   // Handle filter changes
   const handleFilterChange = () => {
     fetchCostData();
+  };
+
+  // Sort table data
+  const handleSort = (field) => {
+    // If clicking the same field, toggle direction
+    const newDirection = (field === sortField) 
+      ? (sortDirection === 'asc' ? 'desc' : 'asc')
+      : 'asc'; // Default to ascending for a new sort field
+    
+    setSortField(field);
+    setSortDirection(newDirection);
+  };
+
+  // Get sorted, filtered, and paginated data
+  const getSortedAndPaginatedData = () => {
+    // First filter the data based on UI filters
+    let filteredData = [...resourcesData];
+    
+    // Sort the data
+    const sortedData = filteredData.sort((a, b) => {
+      // Special case for nested fields
+      if (sortField === 'application_id') {
+        const valA = a.tags.application_id || '';
+        const valB = b.tags.application_id || '';
+        return sortDirection === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else if (sortField === 'environment') {
+        const valA = a.tags.environment || '';
+        const valB = b.tags.environment || '';
+        return sortDirection === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      }
+      
+      // Handle numeric fields
+      if (sortField === 'cost') {
+        return sortDirection === 'asc' 
+          ? a[sortField] - b[sortField] 
+          : b[sortField] - a[sortField];
+      }
+      
+      // Regular string sortFields
+      const valA = a[sortField] || '';
+      const valB = b[sortField] || '';
+      
+      return sortDirection === 'asc' 
+        ? valA.localeCompare(valB) 
+        : valB.localeCompare(valA);
+    });
+    
+    // Get paginated data
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return sortedData.slice(startIndex, endIndex);
   };
 
   // Process data for charts
@@ -202,10 +259,37 @@ const CostExplorerPage = () => {
     fetchUntaggedResources();
   }, [startDate, endDate, selectedAppId]); // Re-fetch when filters change
 
+  // Update data whenever sorting or filtering changes
+  useEffect(() => {
+    // Reset to first page when sorting changes
+    setCurrentPage(1);
+  }, [sortField, sortDirection]);
+
   // Calculate average daily cost
   const averageDailyCost = costData.length > 0 
     ? (totalCost / (Object.keys(getDailyTotalCosts()).length || 1)).toFixed(2) 
     : '0.00';
+
+  // Calculate total pages for pagination
+  const totalPages = Math.ceil(resourcesData.length / itemsPerPage);
+  
+  // Generate array of page numbers for pagination
+  const getPageNumbers = () => {
+    const pages = [];
+    for (let i = 1; i <= totalPages; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+  
+  // Render sort indicator arrow
+  const renderSortArrow = (field) => {
+    if (sortField !== field) return null;
+    
+    return sortDirection === 'asc' 
+      ? <span className="ml-1">↑</span> 
+      : <span className="ml-1">↓</span>;
+  };
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -447,7 +531,7 @@ const CostExplorerPage = () => {
       <div className="grid grid-cols-1 gap-6 mb-6">
         {/* 5.1 All Resources Table */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
             <h2 className="text-lg font-semibold text-gray-800">
               {showUntaggedOnly ? "Untagged Resources" : "All Resources"}
             </h2>
@@ -464,30 +548,63 @@ const CostExplorerPage = () => {
               >
                 <span className="mr-1">🔄</span> Refresh
               </button>
+              
+              {/* Items per page selector */}
+              <select
+                className="px-2 py-1 text-xs bg-gray-100 rounded-md"
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1); // Reset to first page
+                }}
+              >
+                <option value={5}>5 per page</option>
+                <option value={10}>10 per page</option>
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+              </select>
             </div>
           </div>
           
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Resource Name
+              <tr>
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('name')}
+                  >
+                    Resource Name {renderSortArrow('name')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Type
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('type')}
+                  >
+                    Type {renderSortArrow('type')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Resource Group
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('resourceGroup')}
+                  >
+                    Resource Group {renderSortArrow('resourceGroup')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Cost
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('cost')}
+                  >
+                    Cost {renderSortArrow('cost')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Application ID
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('application_id')}
+                  >
+                    Application ID {renderSortArrow('application_id')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Environment
+                  <th 
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                    onClick={() => handleSort('environment')}
+                  >
+                    Environment {renderSortArrow('environment')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Tag Status
@@ -495,7 +612,7 @@ const CostExplorerPage = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {resourcesData.slice(0, 10).map((item) => (
+                {getSortedAndPaginatedData().map((item) => (
                   <tr key={item.id} className={!item.tags.application_id ? "bg-yellow-50" : ""}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {item.name}
@@ -531,6 +648,7 @@ const CostExplorerPage = () => {
                   </tr>
                 ))}
               </tbody>
+
             </table>
           </div>
           
