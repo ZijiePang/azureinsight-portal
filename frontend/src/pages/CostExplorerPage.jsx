@@ -660,12 +660,7 @@ const CostExplorerPage = () => {
       
       {/* 6. Footer Buttons */}
       <div className="flex justify-center space-x-4 mb-6">
-        <button className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center">
-          <span className="mr-2">📘</span> Help Center
-        </button>
-        <button className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center">
-          <span className="mr-2">🤖</span> AI Settings
-        </button>
+
       </div>
       
       {/* Loading State */}
