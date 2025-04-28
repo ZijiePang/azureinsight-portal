@@ -69,9 +69,9 @@ const HomePage = () => {
               <div className="ml-3 text-sm text-blue-900 space-y-2">
                 <p><strong>AzureInsight Portal</strong> is a demo application designed to showcase full-stack skills in building cloud-integrated dashboards.</p>
                 <ul className="list-disc list-inside space-y-1">
-                  <li><strong>Backend</strong> is powered by <span className="font-medium">Python (FastAPI)</span> and simulates Azure services like Key Vault and Cost Management APIs using mock data.</li>
+                  <li><strong>Backend</strong> is powered by <span className="font-medium">Python (FastAPI)</span> and utilizes Azure Key Vault and simulates Azure Cost Management APIs using mock data.</li>
                   <li><strong>Frontend</strong> is built with <span className="font-medium">React and TailwindCSS</span>, with dynamic components and data visualizations using Chart.js.</li>
-                  <li><strong>Demo Mode</strong> uses static mock data. In production, it would securely fetch real data from Azure APIs with authentication and RBAC.</li>
+                  <li><strong>Demo Mode</strong> uses static mock data. Live Mode securely fetch real data from Azure APIs.</li>
                   <li><strong>AI-driven features</strong> like anomaly detection and natural language search are simulated for demonstration and can be extended using tools like <span className="font-medium">OpenAI</span> or <span className="font-medium">scikit-learn</span>.</li>
                 </ul>
                 <p>This portal demonstrates frontend-backend integration, cloud-aware architecture, and modern UI development principles in a production-style layout.</p>

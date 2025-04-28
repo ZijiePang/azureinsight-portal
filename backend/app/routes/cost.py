@@ -15,7 +15,8 @@ async def get_cost_data(
     """Get cost data for the specified date range and optional app ID filter"""
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
-    
+
+    # calling API to get the mock data
     return await cost_service.get_cost_data(start, end, app_id)
 
 @router.get("/untagged")

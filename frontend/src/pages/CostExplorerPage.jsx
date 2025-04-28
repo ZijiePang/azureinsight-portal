@@ -160,6 +160,13 @@ const CostExplorerPage = () => {
   };
 
   // Process data for charts
+  // Return 
+  //[
+  //  { date: "2025-04-24", cost: 500.00, isAnomaly: false },
+  //  { date: "2025-04-25", cost: 750.00, isAnomaly: true },
+  //  { date: "2025-04-26", cost: 620.00, isAnomaly: false },
+  //  ...
+  //]
   const getDailyTotalCosts = () => {
     const dailyCosts = {};
     

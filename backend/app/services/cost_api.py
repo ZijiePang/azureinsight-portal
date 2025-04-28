@@ -199,7 +199,6 @@ class MockCostService:
                             } for item in top_contributors
                         ]
                     })
-        print(anomalies)
         
         return {
             "anomalies": anomalies,
