@@ -1,618 +1,508 @@
 // src/pages/KeyVaultPage.js
 import React, { useState, useEffect } from 'react';
-import { format, parseISO } from 'date-fns';
-import { useMode } from '../contexts/ModeContext';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  TablePagination,
+  CircularProgress,
+  Alert
+} from '@mui/material';
+import { 
+  Search, 
+  Download, 
+  RefreshCw, 
+  Clock, 
+  Shield, 
+  Key, 
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Calendar
+} from 'lucide-react';
 
 const KeyVaultPage = () => {
-  const [secrets, setSecrets] = useState([]);
+  const [activeTab, setActiveTab] = useState('all');
+  const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { useMock } = useMode();
   const [error, setError] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('All');
-  const [filterExpiry, setFilterExpiry] = useState('All');
-  const [filterDescription, setFilterDescription] = useState('All items');
-  const [activeTab, setActiveTab] = useState('All'); // 'All', 'Secret', 'Certificate'
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [selectedItemHistory, setSelectedItemHistory] = useState(null);
-  const [showRotationSuggestion, setShowRotationSuggestion] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [filters, setFilters] = useState({
+    search: '',
+    expirationWindow: 'all',
+    owner: '',
+    vaultName: '',
+    objectType: 'all'
+  });
 
-  // Fetch secrets from API
-  const fetchSecrets = async (query = '') => {
+  // Mock system status - replace with actual API call
+  const [systemStatus, setSystemStatus] = useState({
+    lastSync: '2025-06-17 09:00 AM',
+    syncStatus: 'success',
+    totalSecrets: 0,
+    totalCertificates: 0,
+    expiring60Days: 0,
+    expiring30Days: 0,
+    emailsSentToday: 0
+  });
+
+  // Fetch data from Azure Table Storage
+  useEffect(() => {
+    fetchKeyVaultData();
+  }, []);
+
+  const fetchKeyVaultData = async () => {
     setLoading(true);
     try {
-      let url = 'http://localhost:8000/api/keyvault/secrets';
-      
-      if (query) {
-        url = `http://localhost:8000/api/keyvault/search?query=${encodeURIComponent(query)}`;
-      } else if (filterExpiry === '7') {
-        url = 'http://localhost:8000/api/keyvault/secrets/expiring/7';
-      } else if (filterExpiry === '30') {
-        url = 'http://localhost:8000/api/keyvault/secrets/expiring/30';
-      } else if (filterExpiry === '90') {
-        url = 'http://localhost:8000/api/keyvault/secrets/expiring/90';
-      }
-      
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`API error: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      // Apply additional client-side filtering
-      let filteredSecrets = data.value;
-      
-      // Apply tab filtering
-      if (activeTab !== 'All') {
-        filteredSecrets = filteredSecrets.filter(s => s.type === activeTab);
-      }
-      
-      setSecrets(filteredSecrets);
-      
-      // If using NL search, get description of search
-      if (query) {
-        try {
-          const nlpResponse = await fetch(`http://localhost:8000/api/nlp/parse?query=${encodeURIComponent(query)}`);
-          const nlpData = await nlpResponse.json();
-          setFilterDescription(nlpData.description);
-        } catch (err) {
-          console.error("Failed to parse query:", err);
-          setFilterDescription(`Search results for: "${query}"`);
+      // Replace with your actual API endpoint
+      const response = await fetch('/api/keyvault/data', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
         }
-      } else {
-        setFilterDescription(getFilterDescription());
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch data');
       }
+      
+      const result = await response.json();
+      setData(result.data || []);
+      
+      // Update summary statistics
+      const secrets = result.data.filter(item => item.objectType === 'Secret');
+      const certificates = result.data.filter(item => item.objectType === 'Certificate');
+      const now = new Date();
+      const expiring60 = result.data.filter(item => {
+        const expDate = new Date(item.expirationDate);
+        const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+        return diffDays <= 60 && diffDays > 0;
+      });
+      const expiring30 = result.data.filter(item => {
+        const expDate = new Date(item.expirationDate);
+        const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+        return diffDays <= 30 && diffDays > 0;
+      });
+
+      setSystemStatus(prev => ({
+        ...prev,
+        totalSecrets: secrets.length,
+        totalCertificates: certificates.length,
+        expiring60Days: expiring60.length,
+        expiring30Days: expiring30.length,
+        emailsSentToday: result.emailsSentToday || 0
+      }));
       
     } catch (err) {
-      console.error("Failed to fetch secrets:", err);
       setError(err.message);
+      console.error('Error fetching key vault data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Get human-readable filter description
-  const getFilterDescription = () => {
-    let desc = activeTab === 'All' ? 'All items' : `${activeTab}s`;
-    
-    if (filterExpiry === '7') {
-      desc += ' expiring in the next 7 days';
-    } else if (filterExpiry === '30') {
-      desc += ' expiring in the next 30 days';
-    } else if (filterExpiry === '90') {
-      desc += ' expiring in the next 90 days';
+  const handleManualRefresh = async () => {
+    setLoading(true);
+    try {
+      // Trigger manual sync
+      await fetch('/api/keyvault/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      // Refresh data after sync
+      await fetchKeyVaultData();
+      setSystemStatus(prev => ({
+        ...prev,
+        lastSync: new Date().toLocaleString(),
+        syncStatus: 'success'
+      }));
+    } catch (err) {
+      setSystemStatus(prev => ({
+        ...prev,
+        syncStatus: 'failed'
+      }));
+      setError('Manual sync failed');
     }
-    
-    return desc;
   };
 
-  // Handle search form submission
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      fetchSecrets(searchQuery);
-    }
+  const handleExportCSV = () => {
+    const csvContent = [
+      ['Object Name', 'Object Type', 'Vault Name', 'Expiration Date', 'Days Remaining', 'Owner', 'Issuer', 'Thumbprint', 'Last Email Sent'],
+      ...filteredData.map(row => [
+        row.objectName,
+        row.objectType,
+        row.vaultName,
+        row.expirationDate,
+        row.daysRemaining,
+        row.owner,
+        row.issuer || '',
+        row.thumbprint || '',
+        row.lastEmailSent || ''
+      ])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `keyvault-export-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
   };
 
-  // Reset filters
-  const handleReset = () => {
-    setSearchQuery('');
-    setFilterType('All');
-    setFilterExpiry('All');
-    setActiveTab('All');
-    fetchSecrets();
-  };
-
-  // Apply regular filters
-  const applyFilters = () => {
-    fetchSecrets();
-  };
-
-  // Calculate status based on expiry date
-  const getExpiryStatus = (expiryDate) => {
+  const getDaysRemaining = (expirationDate) => {
     const now = new Date();
-    const expiry = parseISO(expiryDate);
-    const daysToExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-    
-    if (daysToExpiry <= 0) {
-      return { class: 'status-expired', text: 'Expired', icon: '🚫' };
-    } else if (daysToExpiry <= 7) {
-      return { class: 'status-warning', text: 'Expiring Soon', icon: '⚠️' };
+    const expDate = new Date(expirationDate);
+    return Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+  };
+
+  const getExpirationChip = (daysRemaining) => {
+    if (daysRemaining <= 0) {
+      return <Chip label="Expired" color="error" size="small" />;
+    } else if (daysRemaining <= 7) {
+      return <Chip label={`${daysRemaining}d`} color="error" size="small" />;
+    } else if (daysRemaining <= 30) {
+      return <Chip label={`${daysRemaining}d`} color="warning" size="small" />;
+    } else if (daysRemaining <= 60) {
+      return <Chip label={`${daysRemaining}d`} color="info" size="small" />;
     } else {
-      return { class: 'status-safe', text: 'Valid', icon: '✅' };
+      return <Chip label={`${daysRemaining}d`} color="success" size="small" />;
     }
   };
 
-  // Get rotation status icon and text
-  const getRotationStatus = (secret) => {
-    // This would come from your API in a real implementation
-    // Here we're simulating based on the secret ID
-    const id = parseInt(secret.id.split('-')[1]) || 0;
+  // Filter data based on current filters and tab
+  const filteredData = data.filter(item => {
+    const matchesTab = activeTab === 'all' || 
+      (activeTab === 'secrets' && item.objectType === 'Secret') ||
+      (activeTab === 'certificates' && item.objectType === 'Certificate');
     
-    if (id % 3 === 0) {
-      return { icon: '🔁', text: 'Auto', class: 'text-green-600' };
-    } else if (id % 3 === 1) {
-      return { icon: '👤', text: 'Manual', class: 'text-blue-600' };
-    } else {
-      return { icon: '❗', text: 'Not Set', class: 'text-red-600' };
-    }
+    const matchesSearch = !filters.search || 
+      item.objectName.toLowerCase().includes(filters.search.toLowerCase());
+    
+    const matchesOwner = !filters.owner || 
+      item.owner.toLowerCase().includes(filters.owner.toLowerCase());
+    
+    const matchesVault = !filters.vaultName || 
+      item.vaultName.toLowerCase().includes(filters.vaultName.toLowerCase());
+    
+    const matchesExpiration = filters.expirationWindow === 'all' || 
+      (filters.expirationWindow === '30' && getDaysRemaining(item.expirationDate) <= 30) ||
+      (filters.expirationWindow === '60' && getDaysRemaining(item.expirationDate) <= 60) ||
+      (filters.expirationWindow === '90' && getDaysRemaining(item.expirationDate) <= 90);
+
+    return matchesTab && matchesSearch && matchesOwner && matchesVault && matchesExpiration;
+  });
+
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
   };
 
-  // Show rotation history modal
-  const viewHistory = (secret) => {
-    // In a real app, you'd fetch this from an API
-    const mockHistory = [
-      { date: '2025-03-15', action: 'Rotated', user: 'admin_user_1' },
-      { date: '2024-12-01', action: 'Auto-Rotate', user: 'system_bot' },
-      { date: '2024-09-01', action: 'Created', user: 'admin_user_2' }
-    ];
-    
-    setSelectedItemHistory({
-      name: secret.name,
-      type: secret.type,
-      history: mockHistory
-    });
-    
-    setShowHistoryModal(true);
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
   };
-
-  // Show rotation suggestion modal
-  const showSuggestion = () => {
-    setShowRotationSuggestion(true);
-  };
-
-  // Initial load
-  useEffect(() => {
-    fetchSecrets();
-  }, [activeTab, useMock]); 
 
   return (
-    <div className="container mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Azure Key Vault Expiration Dashboard</h1>
-      
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6">
-          {/* Search Form */}
-          <div className="flex-1">
-            <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-1">
-              Natural Language Search
-            </label>
-            <form onSubmit={handleSearch} className="flex">
-              <input
-                type="text"
-                id="search"
-                className="flex-1 border-gray-300 rounded-l-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
-                placeholder="e.g., show certificates expiring in May"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <button
-                type="submit"
-                className="inline-flex items-center px-4 py-2 border border-transparent rounded-r-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              >
-                Search
-              </button>
-            </form>
-          </div>
-          
-          {/* Filter Controls */}
-          <div className="flex space-x-4">
+    <div className="min-h-screen">
+      {/* Header */}
+      <div className="">
+        <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex justify-between items-center">
             <div>
-              <label htmlFor="filter-expiry" className="block text-sm font-bold text-gray-700 mb-1">
-                Expiry
-              </label>
-              <select
-                id="filter-expiry"
-                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                value={filterExpiry}
-                onChange={(e) => setFilterExpiry(e.target.value)}
-              >
-                <option value="All">All</option>
-                <option value="7">≤ 7 days</option>
-                <option value="30">≤ 30 days</option>
-                <option value="90">≤ 90 days</option>
-              </select>
+              <h1 className="text-3xl font-bold text-gray-900">Key Vault Monitoring Dashboard</h1>
+              <p className="text-gray-600 mt-1">Monitor and manage Azure Key Vault secrets and certificates</p>
             </div>
-            
-            <div className="flex items-end space-x-2">
-              <button
-                type="button"
-                onClick={applyFilters}
-                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              >
-                Apply
-              </button>
-              
-              <button
-                type="button"
-                onClick={handleReset}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-            {['All', 'Secret', 'Certificate'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`
-                  whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm
-                  ${activeTab === tab 
-                    ? 'border-primary-500 text-primary-600' 
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
-                `}
-              >
-                {tab === 'Secret' && '🔐 '}
-                {tab === 'Certificate' && '📄 '}
-                {tab === 'All' && '📋 '}
-                {tab}s
-              </button>
-            ))}
-          </nav>
-        </div>
-        
-        {/* Filtered Results Description */}
-        <div className="text-sm text-gray-500 mb-4">
-          Showing: <span className="font-medium">{filterDescription}</span>
-        </div>
-        
-        <div className="flex flex-col lg:flex-row gap-6">
-          <div className="lg:w-3/4">
-            {/* Expiring Soon Alert - Enhanced */}
-            {secrets.filter(s => {
-              const status = getExpiryStatus(s.expirationDate);
-              return status.text === 'Expiring Soon';
-            }).length > 0 && (
-              <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v4a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3 flex-1">
-                    <h3 className="text-sm font-medium text-yellow-800">
-                      Urgent Rotation Required
-                    </h3>
-                    <div className="mt-2 text-sm text-yellow-700">
-                      <p>
-                        <strong className="font-medium">
-                          {secrets.filter(s => {
-                            const status = getExpiryStatus(s.expirationDate);
-                            return status.text === 'Expiring Soon';
-                          }).length} items
-                        </strong> expiring in the next 7 days.
-                      </p>
-                    </div>
-                    <div className="mt-3">
-                      <div className="flex space-x-2">
-                        <button
-                          type="button"
-                          className="inline-flex items-center px-3 py-2 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
-                        >
-                          Send Renewal Reminder
-                        </button>
-                        <button
-                          type="button"
-                          onClick={showSuggestion}
-                          className="inline-flex items-center px-3 py-2 border border-yellow-700 shadow-sm text-sm leading-4 font-medium rounded-md text-yellow-700 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
-                        >
-                          View Rotation Suggestions
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            <div className="flex items-center space-x-4">
+              <div className="text-right">
+                <p className="text-sm text-gray-500">Last Sync Time</p>
+                <p className="text-sm font-medium text-gray-900">{systemStatus.lastSync}</p>
               </div>
-            )}
-            
-            {/* Secrets Table */}
-            <div className="overflow-x-auto">
-              {loading ? (
-                <div className="flex justify-center items-center py-12">
-                  <svg className="animate-spin h-8 w-8 text-primary-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                </div>
-              ) : error ? (
-                <div className="bg-red-50 border-l-4 border-red-400 p-4">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <div className="ml-3">
-                      <p className="text-sm text-red-700">Error: {error}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Environment</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expiration Date</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rotation</th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {secrets.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" className="px-6 py-4 text-center text-sm font-medium text-gray-500">
-                          No secrets or certificates found matching your criteria.
-                        </td>
-                      </tr>
-                    ) : (
-                      secrets.map((secret) => {
-                        const status = getExpiryStatus(secret.expirationDate);
-                        const rotationStatus = getRotationStatus(secret);
-                        return (
-                          <tr key={secret.id}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{secret.name}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {secret.type === 'Secret' ? '🔐 ' : '📄 '}{secret.type}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {secret.tags?.environment || 'N/A'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {secret.expirationDate && !isNaN(Date.parse(secret.expirationDate)) 
-                                ? format(parseISO(secret.expirationDate), 'MMM d, yyyy') 
-                                : 'N/A'
-                              }
-
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                status.text === 'Expired' ? 'bg-red-100 text-red-800' :
-                                status.text === 'Expiring Soon' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-green-100 text-green-800'
-                              }`}>
-                                {status.icon} {status.text}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                rotationStatus.text === 'Auto' ? 'bg-green-100 text-green-800' :
-                                rotationStatus.text === 'Manual' ? 'bg-blue-100 text-blue-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {rotationStatus.icon} {rotationStatus.text}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              <button
-                                type="button"
-                                className="text-primary-600 hover:text-primary-900"
-                              >
-                                View
-                              </button>
-                              {' | '}
-                              <button
-                                type="button"
-                                className="text-primary-600 hover:text-primary-900"
-                              >
-                                Renew
-                              </button>
-                              {' | '}
-                              <button
-                                type="button"
-                                className="text-primary-600 hover:text-primary-900"
-                                onClick={() => viewHistory(secret)}
-                              >
-                                🕘 History
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-          
-          {/* Compliance Tips Sidebar */}
-          <div className="lg:w-1/4">
-            <div className="bg-blue-50 p-4 rounded-md border border-blue-200">
-              <h3 className="font-medium text-blue-800 text-lg mb-3">🛡️ Compliance Tips</h3>
-              <ul className="space-y-2 text-sm text-blue-700">
-                <li className="flex items-start">
-                  <span className="mr-1.5">•</span>
-                  <span>API Secrets should be rotated every 90 days</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-1.5">•</span>
-                  <span>TLS Certificates should be renewed at least 30 days before expiry</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-1.5">•</span>
-                  <span>Avoid using "never expire" for any credentials</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-1.5">•</span>
-                  <span>Set up automated rotation where possible</span>
-                </li>
-              </ul>
-              <div className="mt-4">
-                <button
-                  type="button"
-                  className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  Configure Reminder Policies
-                </button>
+              <div className="flex items-center">
+                {systemStatus.syncStatus === 'success' ? (
+                  <CheckCircle className="h-6 w-6 text-green-500" />
+                ) : (
+                  <XCircle className="h-6 w-6 text-red-500" />
+                )}
+                <span className="ml-2 text-sm font-medium capitalize">
+                  {systemStatus.syncStatus}
+                </span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-
-      {/* History Modal */}
-      {showHistoryModal && selectedItemHistory && (
-        <div className="fixed inset-0 z-10 overflow-y-auto">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                      Rotation History: {selectedItemHistory.name}
-                    </h3>
-                    <div className="mt-4">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">By User</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                          {selectedItemHistory.history.map((entry, index) => (
-                            <tr key={index}>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.date}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.action}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.user}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
+      {/* Summary Panel */}
+      <div className="mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <Key className="h-8 w-8 text-blue-500" />
+              <div className="ml-4">
+                <p className="text-2xl font-bold text-gray-900">{systemStatus.totalSecrets}</p>
+                <p className="text-gray-600">Total Secrets</p>
               </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button 
-                  type="button" 
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={() => setShowHistoryModal(false)}
-                >
-                  Close
-                </button>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <Shield className="h-8 w-8 text-green-500" />
+              <div className="ml-4">
+                <p className="text-2xl font-bold text-gray-900">{systemStatus.totalCertificates}</p>
+                <p className="text-gray-600">Total Certificates</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <AlertTriangle className="h-8 w-8 text-orange-500" />
+              <div className="ml-4">
+                <p className="text-2xl font-bold text-gray-900">{systemStatus.expiring60Days}</p>
+                <p className="text-gray-600">Expiring 60d</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <Clock className="h-8 w-8 text-red-500" />
+              <div className="ml-4">
+                <p className="text-2xl font-bold text-gray-900">{systemStatus.expiring30Days}</p>
+                <p className="text-gray-600">Expiring 30d</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <Calendar className="h-8 w-8 text-purple-500" />
+              <div className="ml-4">
+                <p className="text-2xl font-bold text-gray-900">{systemStatus.emailsSentToday}</p>
+                <p className="text-gray-600">Emails Sent Today</p>
               </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Rotation Suggestion Modal */}
-      {showRotationSuggestion && (
-        <div className="fixed inset-0 z-10 overflow-y-auto">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+      {/* Main Navigation Tabs */}
+      <div className=" mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex space-x-8">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'all'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              All Objects ({data.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('secrets')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'secrets'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Secrets ({systemStatus.totalSecrets})
+            </button>
+            <button
+              onClick={() => setActiveTab('certificates')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'certificates'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Certificates ({systemStatus.totalCertificates})
+            </button>
+          </nav>
+        </div>
+      </div>
+
+      {/* Filters Panel */}
+      <div className=" mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search by name..."
+                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  value={filters.search}
+                  onChange={(e) => setFilters({...filters, search: e.target.value})}
+                />
+              </div>
             </div>
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 sm:mx-0 sm:h-10 sm:w-10">
-                    <svg className="h-6 w-6 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                  </div>
-                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                      AI-Driven Rotation Suggestions
-                    </h3>
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-500">
-                        We've analyzed your rotation patterns and found some areas for improvement:
-                      </p>
-                      <ul className="mt-3 space-y-2 text-sm text-gray-500">
-                        <li className="flex items-start">
-                          <span className="text-orange-500 mr-2">•</span>
-                          <span>5 secrets have manual rotation but could be automated</span>
-                        </li>
-                        <li className="flex items-start">
-                          <span className="text-orange-500 mr-2">•</span>
-                          <span>3 certificates expiring in 7 days have no rotation strategy</span>
-                        </li>
-                        <li className="flex items-start">
-                          <span className="text-orange-500 mr-2">•</span>
-                          <span>Production database credentials should be rotated more frequently</span>
-                        </li>
-                      </ul>
-                    </div>
-                    <div className="mt-4 bg-gray-50 p-3 rounded-md">
-                      <h4 className="text-sm font-medium text-gray-900">Recommended Actions:</h4>
-                      <div className="mt-2 space-y-3">
-                        <div className="flex items-center">
-                          <input
-                            id="automate-rotation"
-                            name="rotation-action"
-                            type="radio"
-                            className="h-4 w-4 text-primary-600 border-gray-300 focus:ring-primary-500"
-                          />
-                          <label htmlFor="automate-rotation" className="ml-3 block text-sm font-medium text-gray-700">
-                            Configure automatic rotation for all eligible secrets
-                          </label>
-                        </div>
-                        <div className="flex items-center">
-                          <input
-                            id="renew-now"
-                            name="rotation-action"
-                            type="radio"
-                            className="h-4 w-4 text-primary-600 border-gray-300 focus:ring-primary-500"
-                          />
-                          <label htmlFor="renew-now" className="ml-3 block text-sm font-medium text-gray-700">
-                            Initiate immediate renewal for expiring items
-                          </label>
-                        </div>
-                        <div className="flex items-center">
-                          <input
-                            id="adjust-policies"
-                            name="rotation-action"
-                            type="radio"
-                            className="h-4 w-4 text-primary-600 border-gray-300 focus:ring-primary-500"
-                          />
-                          <label htmlFor="adjust-policies" className="ml-3 block text-sm font-medium text-gray-700">
-                            Adjust rotation policies based on environment sensitivity
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button
-                  type="button"
-                  className="inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary-600 text-base font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:ml-3 sm:w-auto sm:text-sm"
-                >
-                  Apply Suggestions
-                </button>
-                <button
-                  type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={() => setShowRotationSuggestion(false)}
-                >
-                  Close
-                </button>
-              </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Expiration Window</label>
+              <select
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.expirationWindow}
+                onChange={(e) => setFilters({...filters, expirationWindow: e.target.value})}
+              >
+                <option value="all">All</option>
+                <option value="30">Within 30 days</option>
+                <option value="60">Within 60 days</option>
+                <option value="90">Within 90 days</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Owner</label>
+              <input
+                type="text"
+                placeholder="Filter by owner..."
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.owner}
+                onChange={(e) => setFilters({...filters, owner: e.target.value})}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Vault Name</label>
+              <input
+                type="text"
+                placeholder="Filter by vault..."
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+                value={filters.vaultName}
+                onChange={(e) => setFilters({...filters, vaultName: e.target.value})}
+              />
+            </div>
+            
+            <div className="flex items-end">
+              <button
+                onClick={() => setFilters({search: '', expirationWindow: 'all', owner: '', vaultName: '', objectType: 'all'})}
+                className="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Clear Filters
+              </button>
             </div>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Main Table */}
+      <div className=" mx-auto px-4 sm:px-6 lg:px-8 pb-6">
+        <div className="bg-white rounded-lg shadow">
+          {error && (
+            <Alert severity="error" className="m-4">
+              {error}
+            </Alert>
+          )}
+          
+          {loading ? (
+            <div className="flex justify-center items-center py-12">
+              <CircularProgress />
+            </div>
+          ) : (
+            <TableContainer component={Paper} elevation={0}>
+              <Table>
+                <TableHead className="bg-gray-50">
+                  <TableRow>
+                    <TableCell className="font-semibold">Object Name</TableCell>
+                    <TableCell className="font-semibold">Type</TableCell>
+                    <TableCell className="font-semibold">Vault Name</TableCell>
+                    <TableCell className="font-semibold">Expiration Date</TableCell>
+                    <TableCell className="font-semibold">Days Remaining</TableCell>
+                    <TableCell className="font-semibold">Owner</TableCell>
+                    <TableCell className="font-semibold">Issuer</TableCell>
+                    <TableCell className="font-semibold">Thumbprint</TableCell>
+                    <TableCell className="font-semibold">Last Email Sent</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredData
+                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                    .map((row, index) => {
+                      const daysRemaining = getDaysRemaining(row.expirationDate);
+                      return (
+                        <TableRow key={index} hover>
+                          <TableCell className="font-medium">{row.objectName}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={row.objectType} 
+                              color={row.objectType === 'Secret' ? 'primary' : 'secondary'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>{row.vaultName}</TableCell>
+                          <TableCell>{new Date(row.expirationDate).toLocaleDateString()}</TableCell>
+                          <TableCell>{getExpirationChip(daysRemaining)}</TableCell>
+                          <TableCell className="text-sm">{row.owner}</TableCell>
+                          <TableCell className="text-sm">{row.issuer || '-'}</TableCell>
+                          <TableCell className="text-xs font-mono">
+                            {row.thumbprint ? row.thumbprint.substring(0, 16) + '...' : '-'}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {row.lastEmailSent ? new Date(row.lastEmailSent).toLocaleDateString() : '-'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                </TableBody>
+              </Table>
+              
+              <TablePagination
+                rowsPerPageOptions={[10, 25, 50, 100]}
+                component="div"
+                count={filteredData.length}
+                rowsPerPage={rowsPerPage}
+                page={page}
+                onPageChange={handleChangePage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+              />
+            </TableContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className=" mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex justify-between items-center">
+            <div className="flex space-x-4">
+              <button
+                onClick={handleExportCSV}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </button>
+              
+              <button
+                onClick={handleManualRefresh}
+                disabled={loading}
+                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Manual Refresh
+              </button>
+            </div>
+            
+            <div className="text-sm text-gray-500">
+              Showing {filteredData.length} of {data.length} total objects
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
