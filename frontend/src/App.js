@@ -5,27 +5,17 @@ import Sidebar from './components/common/Sidebar';
 import HomePage from './pages/HomePage';
 import KeyVaultPage from './pages/KeyVaultPage';
 import CostExplorerPage from './pages/CostExplorerPage';
-import { ModeProvider } from './contexts/ModeContext';
 
 //import { serviceManager } from './services/ServiceManager';
 
 function App() {
-  const [useMock, setUseMock] = React.useState(true);
-
-  const toggleMockMode = () => {
-    const newMode = !useMock;
-    setUseMock(newMode);
-    //serviceManager.setUseMock(newMode);
-  };
-
   return (
-    <ModeProvider>
       <Router>
         <div className="flex h-screen bg-gray-100">
           <Sidebar />
 
           <div className="flex-1 flex flex-col overflow-hidden">
-            <Header useMock={useMock} toggleMockMode={toggleMockMode} />
+            <Header />
 
             <main className="flex-1 overflow-y-auto p-4">
               <Routes>
@@ -38,7 +28,6 @@ function App() {
           </div>
         </div>
       </Router>
-    </ModeProvider>
   );
 }
 

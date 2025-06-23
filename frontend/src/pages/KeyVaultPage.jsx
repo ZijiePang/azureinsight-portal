@@ -31,8 +31,9 @@ const KeyVaultPage = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1); // Backend uses 1-based pagination
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
   const [filters, setFilters] = useState({
     search: '',
     expirationWindow: 'all',
@@ -41,10 +42,10 @@ const KeyVaultPage = () => {
     objectType: 'all'
   });
 
-  // Mock system status - replace with actual API call
+  // System status from KPI endpoint
   const [systemStatus, setSystemStatus] = useState({
-    lastSync: '2025-06-17 09:00 AM',
-    syncStatus: 'success',
+    lastSync: '',
+    syncStatus: 'unknown',
     totalSecrets: 0,
     totalCertificates: 0,
     expiring60Days: 0,
@@ -52,16 +53,69 @@ const KeyVaultPage = () => {
     emailsSentToday: 0
   });
 
-  // Fetch data from Azure Table Storage
-  useEffect(() => {
-    fetchKeyVaultData();
-  }, []);
+  // Fetch KPI data
+  const fetchKPISummary = async () => {
+    try {
 
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/keyvault/kpi`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch KPI data');
+      }
+      
+      const kpiData = await response.json();
+      setSystemStatus(prev => ({
+        ...prev,
+        totalSecrets: kpiData.total_secrets,
+        totalCertificates: kpiData.total_certificates,
+        expiring60Days: kpiData.expiring_60_days,
+        expiring30Days: kpiData.expiring_30_days,
+        emailsSentToday: kpiData.alerts_sent_today,
+        syncStatus: 'success'
+      }));
+      
+    } catch (err) {
+      console.error('Error fetching KPI data:', err);
+      setSystemStatus(prev => ({
+        ...prev,
+        syncStatus: 'failed'
+      }));
+    }
+  };
+
+  // Fetch paginated data from backend
   const fetchKeyVaultData = async () => {
     setLoading(true);
     try {
-      // Replace with your actual API endpoint
-      const response = await fetch('/api/keyvault/data', {
+      // Build query parameters
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: rowsPerPage.toString()
+      });
+
+      // Add filters if they exist
+      if (filters.search) {
+        params.append('search_text', filters.search);
+      }
+      if (filters.owner) {
+        params.append('owner', filters.owner);
+      }
+      if (filters.vaultName) {
+        params.append('vault_name', filters.vaultName);
+      }
+      if (filters.expirationWindow !== 'all') {
+        params.append('expiration_window', filters.expirationWindow);
+      }
+      if (filters.objectType !== 'all') {
+        params.append('object_type', filters.objectType === 'secrets' ? 'Secret' : 'Certificate');
+      }
+
+      const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/keyvault/objects?${params}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -73,31 +127,26 @@ const KeyVaultPage = () => {
       }
       
       const result = await response.json();
-      setData(result.data || []);
       
-      // Update summary statistics
-      const secrets = result.data.filter(item => item.objectType === 'Secret');
-      const certificates = result.data.filter(item => item.objectType === 'Certificate');
-      const now = new Date();
-      const expiring60 = result.data.filter(item => {
-        const expDate = new Date(item.expirationDate);
-        const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
-        return diffDays <= 60 && diffDays > 0;
-      });
-      const expiring30 = result.data.filter(item => {
-        const expDate = new Date(item.expirationDate);
-        const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
-        return diffDays <= 30 && diffDays > 0;
-      });
-
-      setSystemStatus(prev => ({
-        ...prev,
-        totalSecrets: secrets.length,
-        totalCertificates: certificates.length,
-        expiring60Days: expiring60.length,
-        expiring30Days: expiring30.length,
-        emailsSentToday: result.emailsSentToday || 0
+      // Transform backend data to frontend format
+      const transformedData = result.items.map(item => ({
+        objectName: item.object_name,
+        objectType: item.object_type,
+        vaultName: item.vault_name,
+        subscriptionId: item.subscription_id,
+        expirationDate: item.expiration_date,
+        daysRemaining: item.days_remaining,
+        owner: item.owner || '',
+        distributionEmail: item.distribution_email || '',
+        issuer: item.issuer || '',
+        thumbprint: item.thumbprint || '',
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
       }));
+      
+      setData(transformedData);
+      setTotalCount(result.total_count);
+      setError(null);
       
     } catch (err) {
       setError(err.message);
@@ -107,48 +156,82 @@ const KeyVaultPage = () => {
     }
   };
 
+  // Initial load
+  useEffect(() => {
+    Promise.all([
+      fetchKeyVaultData(),
+      fetchKPISummary()
+    ]);
+  }, [page, rowsPerPage]);
+
+  // Refetch when filters change (reset to page 1)
+  useEffect(() => {
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchKeyVaultData();
+    }
+  }, [filters]);
+
   const handleManualRefresh = async () => {
     setLoading(true);
     try {
       // Trigger manual sync
-      await fetch('/api/keyvault/sync', {
+      const syncResponse = await fetch('/api/keyvault/sync', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        }
+        },
+        body: JSON.stringify({
+          subscription_ids: null, // Sync all subscriptions
+          force_refresh: true
+        })
       });
       
-      // Refresh data after sync
-      await fetchKeyVaultData();
+      if (!syncResponse.ok) {
+        throw new Error('Manual sync failed');
+      }
+      
+      const syncResult = await syncResponse.json();
+      
+      // Update last sync time
       setSystemStatus(prev => ({
         ...prev,
         lastSync: new Date().toLocaleString(),
         syncStatus: 'success'
       }));
+      
+      // Refresh data after sync
+      await Promise.all([
+        fetchKeyVaultData(),
+        fetchKPISummary()
+      ]);
+      
     } catch (err) {
       setSystemStatus(prev => ({
         ...prev,
         syncStatus: 'failed'
       }));
-      setError('Manual sync failed');
+      setError('Manual sync failed: ' + err.message);
     }
   };
 
   const handleExportCSV = () => {
     const csvContent = [
-      ['Object Name', 'Object Type', 'Vault Name', 'Expiration Date', 'Days Remaining', 'Owner', 'Issuer', 'Thumbprint', 'Last Email Sent'],
-      ...filteredData.map(row => [
+      ['Object Name', 'Object Type', 'Vault Name', 'Subscription ID', 'Expiration Date', 'Days Remaining', 'Owner', 'Distribution Email', 'Issuer', 'Thumbprint'],
+      ...data.map(row => [
         row.objectName,
         row.objectType,
         row.vaultName,
-        row.expirationDate,
-        row.daysRemaining,
+        row.subscriptionId,
+        row.expirationDate ? new Date(row.expirationDate).toISOString().split('T')[0] : '',
+        row.daysRemaining || '',
         row.owner,
-        row.issuer || '',
-        row.thumbprint || '',
-        row.lastEmailSent || ''
+        row.distributionEmail,
+        row.issuer,
+        row.thumbprint
       ])
-    ].map(row => row.join(',')).join('\n');
+    ].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -156,15 +239,27 @@ const KeyVaultPage = () => {
     a.href = url;
     a.download = `keyvault-export-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
+    window.URL.revokeObjectURL(url);
   };
 
-  const getDaysRemaining = (expirationDate) => {
+  const getDaysRemaining = (expirationDate, daysRemaining) => {
+    // Use backend calculated daysRemaining if available
+    if (daysRemaining !== null && daysRemaining !== undefined) {
+      return daysRemaining;
+    }
+    
+    // Fallback calculation
+    if (!expirationDate) return null;
     const now = new Date();
     const expDate = new Date(expirationDate);
     return Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
   };
 
   const getExpirationChip = (daysRemaining) => {
+    if (daysRemaining === null || daysRemaining === undefined) {
+      return <Chip label="No Expiry" color="default" size="small" />;
+    }
+    
     if (daysRemaining <= 0) {
       return <Chip label="Expired" color="error" size="small" />;
     } else if (daysRemaining <= 7) {
@@ -178,36 +273,33 @@ const KeyVaultPage = () => {
     }
   };
 
-  // Filter data based on current filters and tab
-  const filteredData = data.filter(item => {
-    const matchesTab = activeTab === 'all' || 
-      (activeTab === 'secrets' && item.objectType === 'Secret') ||
-      (activeTab === 'certificates' && item.objectType === 'Certificate');
-    
-    const matchesSearch = !filters.search || 
-      item.objectName.toLowerCase().includes(filters.search.toLowerCase());
-    
-    const matchesOwner = !filters.owner || 
-      item.owner.toLowerCase().includes(filters.owner.toLowerCase());
-    
-    const matchesVault = !filters.vaultName || 
-      item.vaultName.toLowerCase().includes(filters.vaultName.toLowerCase());
-    
-    const matchesExpiration = filters.expirationWindow === 'all' || 
-      (filters.expirationWindow === '30' && getDaysRemaining(item.expirationDate) <= 30) ||
-      (filters.expirationWindow === '60' && getDaysRemaining(item.expirationDate) <= 60) ||
-      (filters.expirationWindow === '90' && getDaysRemaining(item.expirationDate) <= 90);
+  // Filter data based on current tab (client-side filtering for tabs only)
+  const getFilteredDataForTab = () => {
+    if (activeTab === 'all') return data;
+    if (activeTab === 'secrets') return data.filter(item => item.objectType === 'Secret');
+    if (activeTab === 'certificates') return data.filter(item => item.objectType === 'Certificate');
+    return data;
+  };
 
-    return matchesTab && matchesSearch && matchesOwner && matchesVault && matchesExpiration;
-  });
+  const filteredData = getFilteredDataForTab();
 
   const handleChangePage = (event, newPage) => {
-    setPage(newPage);
+    setPage(newPage + 1); // Convert from 0-based to 1-based
   };
 
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    setPage(1); // Reset to first page
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      search: '',
+      expirationWindow: 'all',
+      owner: '',
+      vaultName: '',
+      objectType: 'all'
+    });
   };
 
   return (
@@ -223,13 +315,15 @@ const KeyVaultPage = () => {
             <div className="flex items-center space-x-4">
               <div className="text-right">
                 <p className="text-sm text-gray-500">Last Sync Time</p>
-                <p className="text-sm font-medium text-gray-900">{systemStatus.lastSync}</p>
+                <p className="text-sm font-medium text-gray-900">{systemStatus.lastSync || 'Never'}</p>
               </div>
               <div className="flex items-center">
                 {systemStatus.syncStatus === 'success' ? (
                   <CheckCircle className="h-6 w-6 text-green-500" />
-                ) : (
+                ) : systemStatus.syncStatus === 'failed' ? (
                   <XCircle className="h-6 w-6 text-red-500" />
+                ) : (
+                  <Clock className="h-6 w-6 text-gray-400" />
                 )}
                 <span className="ml-2 text-sm font-medium capitalize">
                   {systemStatus.syncStatus}
@@ -307,7 +401,7 @@ const KeyVaultPage = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              All Objects ({data.length})
+              All Objects ({totalCount})
             </button>
             <button
               onClick={() => setActiveTab('secrets')}
@@ -389,7 +483,7 @@ const KeyVaultPage = () => {
             
             <div className="flex items-end">
               <button
-                onClick={() => setFilters({search: '', expirationWindow: 'all', owner: '', vaultName: '', objectType: 'all'})}
+                onClick={clearFilters}
                 className="w-full bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 transition-colors"
               >
                 Clear Filters
@@ -423,49 +517,50 @@ const KeyVaultPage = () => {
                     <TableCell className="font-semibold">Expiration Date</TableCell>
                     <TableCell className="font-semibold">Days Remaining</TableCell>
                     <TableCell className="font-semibold">Owner</TableCell>
+                    <TableCell className="font-semibold">Distribution Email</TableCell>
                     <TableCell className="font-semibold">Issuer</TableCell>
                     <TableCell className="font-semibold">Thumbprint</TableCell>
-                    <TableCell className="font-semibold">Last Email Sent</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredData
-                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                    .map((row, index) => {
-                      const daysRemaining = getDaysRemaining(row.expirationDate);
-                      return (
-                        <TableRow key={index} hover>
-                          <TableCell className="font-medium">{row.objectName}</TableCell>
-                          <TableCell>
-                            <Chip 
-                              label={row.objectType} 
-                              color={row.objectType === 'Secret' ? 'primary' : 'secondary'}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell>{row.vaultName}</TableCell>
-                          <TableCell>{new Date(row.expirationDate).toLocaleDateString()}</TableCell>
-                          <TableCell>{getExpirationChip(daysRemaining)}</TableCell>
-                          <TableCell className="text-sm">{row.owner}</TableCell>
-                          <TableCell className="text-sm">{row.issuer || '-'}</TableCell>
-                          <TableCell className="text-xs font-mono">
-                            {row.thumbprint ? row.thumbprint.substring(0, 16) + '...' : '-'}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {row.lastEmailSent ? new Date(row.lastEmailSent).toLocaleDateString() : '-'}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                  {filteredData.map((row, index) => {
+                    const daysRemaining = getDaysRemaining(row.expirationDate, row.daysRemaining);
+                    return (
+                      <TableRow key={`${row.vaultName}-${row.objectName}-${row.objectType}`} hover>
+                        <TableCell className="font-medium">{row.objectName}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={row.objectType} 
+                            color={row.objectType === 'Secret' ? 'primary' : 'secondary'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>{row.vaultName}</TableCell>
+                        <TableCell>
+                          {row.expirationDate 
+                            ? new Date(row.expirationDate).toLocaleDateString() 
+                            : 'No Expiry'
+                          }
+                        </TableCell>
+                        <TableCell>{getExpirationChip(daysRemaining)}</TableCell>
+                        <TableCell className="text-sm">{row.owner || '-'}</TableCell>
+                        <TableCell className="text-sm">{row.distributionEmail || '-'}</TableCell>
+                        <TableCell className="text-sm">{row.issuer || '-'}</TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {row.thumbprint ? row.thumbprint.substring(0, 16) + '...' : '-'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               
               <TablePagination
                 rowsPerPageOptions={[10, 25, 50, 100]}
                 component="div"
-                count={filteredData.length}
+                count={totalCount}
                 rowsPerPage={rowsPerPage}
-                page={page}
+                page={page - 1} // Convert back to 0-based for Material-UI
                 onPageChange={handleChangePage}
                 onRowsPerPageChange={handleChangeRowsPerPage}
               />
@@ -481,7 +576,8 @@ const KeyVaultPage = () => {
             <div className="flex space-x-4">
               <button
                 onClick={handleExportCSV}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                disabled={filteredData.length === 0}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Export CSV
@@ -498,7 +594,7 @@ const KeyVaultPage = () => {
             </div>
             
             <div className="text-sm text-gray-500">
-              Showing {filteredData.length} of {data.length} total objects
+              Showing {filteredData.length} of {totalCount} total objects
             </div>
           </div>
         </div>
