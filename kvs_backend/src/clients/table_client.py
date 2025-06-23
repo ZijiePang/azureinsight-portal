@@ -1,6 +1,7 @@
 # src/clients/table_client.py
-
+import os
 from azure.data.tables import TableServiceClient, TableClient
+
 from azure.core.exceptions import ResourceNotFoundError
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
@@ -12,10 +13,10 @@ from src.models.schemas import QueryFilters
 logger = logging.getLogger(__name__)
 
 class AzureTableClient:
-    def __init__(self, connection_string: str, table_name: str = "keyvaultobjects"):
-        self.connection_string = connection_string
+    def __init__(self, credential, table_name: str = "keyvaultobjects"):
+        
         self.table_name = table_name
-        self.table_service = TableServiceClient.from_connection_string(connection_string)
+        self.table_service = TableServiceClient(endpoint=os.getenv('AZURE_TABLE_ENDPOINT'), credential=credential)
         self.table_client = self.table_service.get_table_client(table_name)
         self._ensure_table_exists()
         
@@ -36,29 +37,40 @@ class AzureTableClient:
             raise
             
     async def batch_upsert(self, entities: List[KeyVaultObjectEntity]) -> None:
-        """Batch upsert multiple entities"""
+        """
+        Batch upsert entities to Azure Table Storage using submit_transaction().
+        New SDK requires same PartitionKey and max 100 entities per batch.
+        """
         try:
-            # Azure Table Storage batch operations are limited to 100 entities
-            # and all entities must have the same partition key
             batch_size = 100
-            
-            # Group by partition key
             partitions = {}
+
+            # Group entities by PartitionKey
             for entity in entities:
-                partition_key = entity['PartitionKey']
-                if partition_key not in partitions:
-                    partitions[partition_key] = []
-                partitions[partition_key].append(entity)
-            
+                pk = entity["PartitionKey"]
+                partitions.setdefault(pk, []).append(entity)
+
             # Process each partition
             for partition_key, partition_entities in partitions.items():
                 for i in range(0, len(partition_entities), batch_size):
                     batch = partition_entities[i:i + batch_size]
-                    with self.table_client.create_batch() as batch_ops:
-                        for entity in batch:
-                            entity['updated_at'] = datetime.now(timezone.utc)
-                            batch_ops.upsert_entity(entity)
-                            
+
+                    # Update timestamps
+                    for entity in batch:
+                        entity["updated_at"] = datetime.now(timezone.utc)
+
+                    # Build transaction actions
+                    actions = [
+                        TableTransactionAction(
+                            operation="upsert_merge",  # or "upsert_replace"
+                            entity=entity
+                        )
+                        for entity in batch
+                    ]
+
+                    # Submit to Azure Table
+                    self.table_client.submit_transaction(actions)
+
         except Exception as e:
             logger.error(f"Failed to batch upsert entities: {e}")
             raise

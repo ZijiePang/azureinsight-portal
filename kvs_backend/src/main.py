@@ -8,7 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+from azure.identity import AzureCliCredential
+
 from azure.identity import DefaultAzureCredential
+from azure.mgmt.resource import SubscriptionClient
 
 from src.clients.keyvault_client import KeyVaultClient
 from src.clients.table_client import AzureTableClient
@@ -38,12 +41,19 @@ async def lifespan(app: FastAPI):
 async def startup_event():
     """Initialize services and start scheduler"""
     try:
-        credential = DefaultAzureCredential()
+        credential = AzureCliCredential()
 
+        #credential = DefaultAzureCredential()
+        token = credential.get_token("https://management.azure.com/.default")
+        print(f"[TOKEN ACQUIRED] Expires at {token.expires_on}")
+    except Exception as e:
+        logging.error(f"[AUTH ERROR] Unable to get token: {e}")
+        raise
+    try:
         # Initialize clients
         keyvault_client = KeyVaultClient(credential)
         table_client = AzureTableClient(
-            connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
+            credential=credential,
             table_name=os.getenv("TABLE_NAME", "keyvaultobjects")
         )
         email_client = EmailClient(

@@ -30,6 +30,7 @@ class KeyVaultService:
             
             # Get subscriptions to process
             all_subscriptions = await self.kv_client.list_subscriptions()
+            print("DEBUG subscriptions:", all_subscriptions)
             target_subscriptions = [
                 sub for sub in all_subscriptions 
                 if not subscription_ids or sub["subscription_id"] in subscription_ids

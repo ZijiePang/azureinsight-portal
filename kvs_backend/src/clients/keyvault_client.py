@@ -35,7 +35,7 @@ class KeyVaultClient:
             kv_client = KeyVaultManagementClient(self.credential, subscription_id)
             vaults = []
             
-            for vault in kv_client.vaults.list():
+            for vault in kv_client.vaults.list_by_subscription():
                 vaults.append({
                     "name": vault.name,
                     "vault_uri": vault.properties.vault_uri,
